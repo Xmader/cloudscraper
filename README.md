@@ -1,6 +1,13 @@
-# 🛑 THIS LIBRARY IS NO LONGER SUPPORTED AND IS DEPRECATED 🛑
+# HEADLESS INFORMATION
 
+Only works on Node.js versions >= 12.11.0 as you must change the signature algorithms that Node.js offers on handshake.
+If you plan on using proxies, use [this patch](https://gist.github.com/ryxnSZN/59012bc8b5bfbfe39cd4f941f5223d2e) to match sure `sigalgs` work.
 
+## Potential Detection Vectors
+ - The TLS fingerprint of the browser is likely different than Node.js
+ - `navigator.platform` may not match the User-Agent
+ - The browser does not use a proxy when making challenge requests
+ - The browser does not pass additional cookies back to the request, however, some browsers (Brave) also ignore these cookies
 
 cloudscraper
 ============
@@ -31,7 +38,7 @@ If you notice that for some reason cloudscraper stops working, do not hesitate a
 Install
 ============
 ```sh
-npm install cloudscraper
+npm install ryxnSZN/cloudscraper
 ```
 
 Saving the `request` module as a dependency is compulsory.
@@ -221,3 +228,4 @@ In the beginning cloudscraper was a port of python module [cloudflare-scrape](ht
 
 ## Dependencies
 * [request-promise](https://github.com/request/request-promise)
+* [puppeteer](https://github.com/puppeteer/puppeteer)
