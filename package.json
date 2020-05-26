@@ -1,6 +1,6 @@
 {
   "name": "cloudscraper",
-  "version": "4.6.0",
+  "version": "4.7.0",
   "description": "Bypasses cloudflare's anti-ddos page",
   "main": "index.js",
   "engines": {
@@ -37,7 +37,7 @@
     "bypass",
     "challenge"
   ],
-  "author": "Oleksii Sribnyi",
+  "author": "Oleksii Sribnyi & @ryxnSZN",
   "license": "MIT",
   "homepage": "https://github.com/codemanki/cloudscraper",
   "dependencies": {
