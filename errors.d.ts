@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+// @ts-ignore
 import * as rp from 'request-promise/errors';
 import cloudscraper = require('.');
 import http = require('http');

@@ -1,8 +1,11 @@
 import { URL } from 'url';
 import http = require('http');
 import https = require('https');
+// @ts-ignore
 import Promise = require('bluebird');
+// @ts-ignore
 import request = require('request');
+// @ts-ignore
 import rp = require('request-promise');
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 import errors = require('./errors');
