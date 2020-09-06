@@ -311,7 +311,7 @@ function onChallenge (options, response, body) {
     payload[hiddenInputName] = match[2];
   }
 
-  match = body.match(/name="jschl_vc" value="(\w+)"/);
+  match = body.match(/value="(\w+)"\sid="jschl-vc"/);
   if (!match) {
     cause = 'challengeId (jschl_vc) extraction failed';
     return callback(new ParserError(cause, options, response));
