@@ -5,8 +5,9 @@ const sandbox = require('./lib/sandbox');
 const decodeEmails = require('./lib/email-decode.js');
 const { getDefaultHeaders, caseless } = require('./lib/headers');
 const brotli = require('./lib/brotli');
-const crypto = require('crypto');
+const { getChromeRuntimeMock } = require('./lib/chromeRuntime');
 const { deprecate } = require('util');
+const puppeteer = require('puppeteer');
 
 const {
   RequestError,
@@ -42,7 +43,8 @@ function defaults (params) {
     gzip: true,
     agentOptions: {
       // Removes a few problematic TLSv1.0 ciphers to avoid CAPTCHA
-      ciphers: crypto.constants.defaultCipherList + ':!ECDHE+SHA:!AES128-SHA'
+      sigalgs: 'ECDSA+SHA256'
+      // ciphers: crypto.constants.defaultCipherList + ':!ECDHE+SHA:!AES128-SHA'
     }
   };
 
@@ -284,7 +286,7 @@ function validateResponse (options, response, body) {
   return false;
 }
 
-function onChallenge (options, response, body) {
+async function onChallenge (options, response, body) {
   const callback = options.callback;
   const uri = response.request.uri;
   // The query string to send back to Cloudflare
@@ -301,100 +303,85 @@ function onChallenge (options, response, body) {
     return callback(error);
   }
 
-  let timeout = parseInt(options.cloudflareTimeout);
-  let match;
+  const browser = await puppeteer.launch({ headless: true });
+  const page = await browser.newPage();
 
-  match = body.match(/name="(.+?)" value="(.+?)"/);
-
-  if (match) {
-    const hiddenInputName = match[1];
-    payload[hiddenInputName] = match[2];
-  }
-
-  match = body.match(/value="(\w+)"\sid="jschl-vc"/);
-  if (!match) {
-    cause = 'challengeId (jschl_vc) extraction failed';
-    return callback(new ParserError(cause, options, response));
-  }
-
-  payload.jschl_vc = match[1];
-
-  match = body.match(/name="pass" value="(.+?)"/);
-  if (!match) {
-    cause = 'Attribute (pass) value extraction failed';
-    return callback(new ParserError(cause, options, response));
-  }
-
-  payload.pass = match[1];
-
-  match = body.match(/getElementById\('cf-content'\)[\s\S]+?setTimeout.+?\r?\n([\s\S]+?a\.value\s*=.+?)\r?\n(?:[^{<>]*},\s*(\d{4,}))?/);
-  if (!match) {
-    cause = 'setTimeout callback extraction failed';
-    return callback(new ParserError(cause, options, response));
-  }
-
-  if (isNaN(timeout)) {
-    if (match[2] !== undefined) {
-      timeout = parseInt(match[2]);
-
-      if (timeout > options.cloudflareMaxTimeout) {
-        if (debugging) {
-          console.warn('Cloudflare\'s timeout is excessive: ' + (timeout / 1000) + 's');
+  await page.evaluateOnNewDocument(
+    args => {
+      if (args && args.fns) {
+        for (const fn of Object.keys(args.fns)) {
+          eval(`var ${fn} =  ${args.fns[fn]}`) // eslint-disable-line
         }
-
-        timeout = options.cloudflareMaxTimeout;
       }
-    } else {
-      cause = 'Failed to parse challenge timeout';
-      return callback(new ParserError(cause, options, response));
+
+      window.chrome = getChromeRuntimeMock(window);
+    },
+    {
+      fns: {
+        getChromeRuntimeMock: `${getChromeRuntimeMock.toString()}`
+      }
     }
-  }
+  );
 
-  // Append a.value so it's always returned from the vm
-  response.challenge = match[1] + '; a.value';
+  const ua = response.request.headers[Object.keys(response.request.headers).find(key => key.toLowerCase() === 'user-agent')];
+  await page.setUserAgent(ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36');
 
-  try {
-    const ctx = new sandbox.Context({ hostname: uri.hostname, body });
-    payload.jschl_answer = sandbox.eval(response.challenge, ctx);
-  } catch (error) {
-    error.message = 'Challenge evaluation failed: ' + error.message;
-    return callback(new ParserError(error, options, response));
-  }
+  await page.setRequestInterception(true);
+  page.on('request', async request => {        
+    if (request.url() === uri.href) {
+      options.challengesToSolve -= 1;
 
-  if (isNaN(payload.jschl_answer)) {
-    cause = 'Challenge answer is not a number';
-    return callback(new ParserError(cause, options, response));
-  }
+      if (options.challengesToSolve === 0) {
+        cause = 'Cloudflare challenge loop';
+        error = new CloudflareError(cause, options, response);
+        error.errorType = 4;
 
-  // Prevent reusing the headers object to simplify unit testing.
-  options.headers = Object.assign({}, options.headers);
-  // Use the original uri as the referer and to construct the answer uri.
-  options.headers.Referer = uri.href;
-  // Check is form to be submitted via GET or POST
-  match = body.match(/id="challenge-form" action="(.+?)" method="(.+?)"/);
-  if (match && match[2] && match[2] === 'POST') {
-    options.uri = uri.protocol + '//' + uri.host + match[1];
-    // Pass the payload using body form
-    options.form = payload;
-    options.method = 'POST';
-  } else {
-    // Whatever is there, fallback to GET
-    options.uri = uri.protocol + '//' + uri.host + '/cdn-cgi/l/chk_jschl';
-    // Pass the payload using query string
-    options.qs = payload;
-  }
-  // Decrement the number of challenges to solve.
-  options.challengesToSolve -= 1;
-  // baseUrl can't be used in conjunction with an absolute uri
-  if (options.baseUrl !== undefined) {
-    options.baseUrl = undefined;
-  }
-  // Change required by Cloudflate in Jan-Feb 2020
-  options.uri = options.uri.replace(/&amp;/g, '&');
+        browser.close();
 
-  // Make request with answer after delay.
-  timeout -= Date.now() - response.responseStartTime;
-  setTimeout(performRequest, timeout, options, false);
+        return callback(error);
+      }
+
+      request.respond({
+        status: 503,
+        body
+      });
+    } else if (request.isNavigationRequest()) {
+      // Prevent reusing the headers object to simplify unit testing.
+      options.headers = Object.assign({}, options.headers);
+      // Use the original uri as the referer and to construct the answer uri.
+      options.headers.Referer = uri.href;
+      // Check is form to be submitted via GET or POST
+      options.uri = request.url();
+
+      const method = request.method();
+      if (method === 'POST') {
+        const parts = request.postData().split('&').map(p => p.split('='));
+        for (const part of parts) {
+          payload[part[0]] = decodeURIComponent(part[1]);
+        };
+
+        // Pass the payload using body form
+        options.form = payload;
+        options.method = 'POST';
+      } else {
+        // Whatever is there, fallback to GET
+        options.uri = uri.protocol + '//' + uri.host + '/cdn-cgi/l/chk_jschl';
+        // Pass the payload using query string
+        options.qs = { ...response.request.qs, ...payload };
+      }
+
+      if (options.baseUrl !== undefined) {
+        options.baseUrl = undefined;
+      }
+
+      performRequest(options, false);
+      browser.close();
+    } else {
+      request.continue();
+    }
+  });
+
+  await page.goto(uri.href);
 }
 
 // Parses the reCAPTCHA form and hands control over to the user
