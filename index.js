@@ -324,7 +324,7 @@ async function onChallenge (options, response, body) {
   );
 
   const ua = response.request.headers[Object.keys(response.request.headers).find(key => key.toLowerCase() === 'user-agent')];
-  await page.setUserAgent(ua || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.138 Safari/537.36');
+  await page.setUserAgent(ua || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.0 Safari/537.36');
 
   await page.setRequestInterception(true);
   page.on('request', async request => {        
