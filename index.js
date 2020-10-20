@@ -329,7 +329,7 @@ async function onChallenge (options, response, body) {
   let isFirstRequest = true;
 
   await page.setRequestInterception(true);
-  await page.setJavaScriptEnabled(false);
+  // await page.setJavaScriptEnabled(false);
 
   page.on('requestfinished', async (request) => {
     if (request.url() === uri.href) {
