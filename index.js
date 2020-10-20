@@ -178,31 +178,6 @@ function onRequestResponse (options, error, response, body) {
     return callback(null, response, body);
   }
 
-  // Decompress brotli compressed responses
-  if (/\bbr\b/i.test('' + headers['content-encoding'])) {
-    if (!brotli.isAvailable) {
-      const cause = 'Received a Brotli compressed response. Please install brotli';
-      return callback(new RequestError(cause, options, response));
-    }
-
-    try {
-      response.body = body = brotli.decompress(body);
-    } catch (error) {
-      return callback(new RequestError(error, options, response));
-    }
-
-    // Request doesn't handle brotli and would've failed to parse JSON.
-    if (options.json) {
-      try {
-        response.body = body = JSON.parse(body, response.request._jsonReviver);
-        // If successful, this isn't a challenge.
-        return callback(null, response, body);
-      } catch (error) {
-        // Request's debug will log the failure, no need to duplicate.
-      }
-    }
-  }
-
   if (response.isCloudflare && response.isHTML) {
     onCloudflareResponse(options, response, body);
   } else {
@@ -327,59 +302,24 @@ async function onChallenge (options, response, body) {
   await page.setUserAgent(ua || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.0 Safari/537.36');
 
   await page.setRequestInterception(true);
-  page.on('request', async request => {        
+
+  page.on('requestfinished', async (request) => {
     if (request.url() === uri.href) {
-      options.challengesToSolve -= 1;
-
-      if (options.challengesToSolve === 0) {
-        cause = 'Cloudflare challenge loop';
-        error = new CloudflareError(cause, options, response);
-        error.errorType = 4;
-
-        browser.close();
-
-        return callback(error);
-      }
-
-      request.respond({
-        status: 503,
-        body
-      });
-    } else if (request.isNavigationRequest()) {
-      // Prevent reusing the headers object to simplify unit testing.
-      options.headers = Object.assign({}, options.headers);
-      // Use the original uri as the referer and to construct the answer uri.
-      options.headers.Referer = uri.href;
-      // Check is form to be submitted via GET or POST
-      options.uri = request.url();
-
-      const method = request.method();
-      if (method === 'POST') {
-        const parts = request.postData().split('&').map(p => p.split('='));
-        for (const part of parts) {
-          payload[part[0]] = decodeURIComponent(part[1]);
-        };
-
-        // Pass the payload using body form
-        options.form = payload;
-        options.method = 'POST';
-      } else {
-        // Whatever is there, fallback to GET
-        options.uri = uri.protocol + '//' + uri.host + '/cdn-cgi/l/chk_jschl';
-        // Pass the payload using query string
-        options.qs = { ...response.request.qs, ...payload };
-      }
-
-      if (options.baseUrl !== undefined) {
-        options.baseUrl = undefined;
-      }
-
-      performRequest(options, false);
-      browser.close();
-    } else {
-      request.continue();
+      const res = request.response();
+      const body = await res.buffer();
+      const headers = await res.buffer();
+      onRequestResponse(options, null, { headers, body }, body);
     }
   });
+
+  page.on('requestfailed', request => {
+    if (request.url() === uri.href) {
+      const { errorText } = request.failure();
+      onRequestResponse(options, errorText);
+    }
+  });
+
+  page.on('request', request => request.continue());
 
   await page.goto(uri.href);
 }
