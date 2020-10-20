@@ -326,45 +326,34 @@ async function onChallenge (options, response, body) {
   const ua = response.request.headers[Object.keys(response.request.headers).find(key => key.toLowerCase() === 'user-agent')];
   await page.setUserAgent(ua || 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.0 Safari/537.36');
 
-  let isFirstRequest = true
+  let isFirstRequest = true;
 
   await page.setRequestInterception(true);
-  await page.setJavaScriptEnabled(false)
+  await page.setJavaScriptEnabled(false);
 
   page.on('requestfinished', async (request) => {
     if (request.url() === uri.href) {
       const res = request.response();
       const body = await res.buffer();
-      if (!body.includes('<title>Just a moment...</title>')) {
+
+      // console.log(123, request.url(), request.isNavigationRequest())
+
+      if (!body.includes('<title>Just a moment...</title>') || !isFirstRequest) {
         const headers = await res.buffer();
         onRequestResponse(options, null, { headers, body }, body);
+      }
+
+      if (request.isNavigationRequest() && !request.url().includes('youtube')) {
+        if (isFirstRequest) {
+          isFirstRequest = false;
+        }
       }
     }
   });
 
   page.on('request', async request => {
-    if (request.isNavigationRequest() && !request.url().includes('youtube')) {
-      if (isFirstRequest) {
-        request.continue();
-        isFirstRequest = false;
-        return;
-      }
-
-      // Prevent reusing the headers object to simplify unit testing.
-      options.headers = Object.assign({}, options.headers);
-      // Use the original uri as the referer and to construct the answer uri.
-      options.headers.Referer = uri.href;
-      // Check is form to be submitted via GET or POST
-      options.uri = request.url();
-
-      if (options.baseUrl !== undefined) {
-        options.baseUrl = undefined;
-      }
-
-      performRequest(options, false);
-    } else {
-      request.continue();
-    }
+    // console.log(request.url(), request.isNavigationRequest())
+    request.continue();
   });
 
   await page.goto(uri.href);
